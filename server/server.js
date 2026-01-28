@@ -1,0 +1,511 @@
+const express = require('express');
+const crypto = require('crypto');
+const path = require('path');
+const http = require('http');
+const { WebSocketServer } = require('ws');
+const FaucetDB = require('./db');
+
+// Configuration from environment
+const CONFIG = {
+  RPC_HOST: process.env.RPC_HOST || '127.0.0.1',
+  RPC_PORT: parseInt(process.env.RPC_PORT || '18334'),
+  RPC_USER: process.env.RPC_USER || 'btqrpc',
+  RPC_PASS: process.env.RPC_PASS || '',
+  RPC_WALLET: process.env.RPC_WALLET || 'faucet',
+  FAUCET_FEE: parseFloat(process.env.FAUCET_FEE || '0.0001'),
+  REWARD_PER_MINUTE: parseFloat(process.env.REWARD_PER_MINUTE || '0.01'),
+  MIN_CLAIM: parseFloat(process.env.MIN_CLAIM || '0.01'),
+  DIFFICULTY_BASE: parseInt(process.env.DIFFICULTY_BASE || '4'),
+  DIFFICULTY_STEP_SECONDS: parseInt(process.env.DIFFICULTY_STEP_SECONDS || '300'),
+  ACTIVE_SHARE_WINDOW: parseInt(process.env.ACTIVE_SHARE_WINDOW || '30'),
+  SESSION_EXPIRE_SECONDS: parseInt(process.env.SESSION_EXPIRE_SECONDS || '3600'),
+  IP_SALT: process.env.IP_SALT || crypto.randomBytes(32).toString('hex'),
+  PORT: parseInt(process.env.PORT || '3000')
+};
+
+const app = express();
+const db = new FaucetDB();
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '../web')));
+
+// RPC client with Basic auth
+async function btqRPC(method, params = []) {
+  const url = `http://${CONFIG.RPC_HOST}:${CONFIG.RPC_PORT}/wallet/${CONFIG.RPC_WALLET}`;
+  const auth = Buffer.from(`${CONFIG.RPC_USER}:${CONFIG.RPC_PASS}`).toString('base64');
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${auth}`
+      },
+      body: JSON.stringify({
+        jsonrpc: '1.0',
+        id: Date.now(),
+        method,
+        params
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      // Try to auto-load wallet if it's not loaded
+      if (data.error.message && data.error.message.includes('not found') && method !== 'loadwallet') {
+        console.log('Wallet not loaded, attempting to load...');
+        await btqRPC('loadwallet', [CONFIG.RPC_WALLET]);
+        // Retry original request
+        return await btqRPC(method, params);
+      }
+      throw new Error(data.error.message || 'RPC error');
+    }
+
+    return data.result;
+  } catch (error) {
+    console.error(`RPC Error (${method}):`, error.message);
+    throw error;
+  }
+}
+
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
+}
+
+// Hash IP for privacy
+function hashIP(ip, salt = CONFIG.IP_SALT) {
+  return crypto.createHash('sha256').update(ip + salt).digest('hex');
+}
+
+// Get client IP
+function getClientIP(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0] ||
+         req.connection.remoteAddress ||
+         req.socket.remoteAddress;
+}
+
+function computeDifficulty(baseDifficulty, activeSeconds) {
+  const steps = Math.floor(activeSeconds / CONFIG.DIFFICULTY_STEP_SECONDS);
+  return baseDifficulty + steps;
+}
+
+function computeAccrued(activeSeconds) {
+  return (activeSeconds / 60) * CONFIG.REWARD_PER_MINUTE;
+}
+
+function validateAddress(address) {
+  return address && address.length > 0;
+}
+
+// Select coins for transaction
+function selectCoins(utxos, targetAmount) {
+  // Sort UTXOs by amount (ascending) for efficient selection
+  const sorted = [...utxos].sort((a, b) => a.amount - b.amount);
+
+  let selected = [];
+  let total = 0;
+
+  for (const utxo of sorted) {
+    selected.push(utxo);
+    total += utxo.amount;
+
+    if (total >= targetAmount) {
+      return { selected, total };
+    }
+  }
+
+  throw new Error('Insufficient funds');
+}
+
+// Send transaction using Dilithium signing
+async function sendDilithiumTx(address, amount, fee) {
+  try {
+    // 1. List unspent outputs
+    const utxos = await btqRPC('listunspent');
+
+    if (!utxos || utxos.length === 0) {
+      throw new Error('No UTXOs available');
+    }
+
+    // 2. Select coins
+    const targetAmount = amount + fee;
+    const { selected, total } = selectCoins(utxos, targetAmount);
+
+    // 3. Prepare inputs
+    const inputs = selected.map(utxo => ({
+      txid: utxo.txid,
+      vout: utxo.vout
+    }));
+
+    // 4. Prepare outputs
+    const outputs = { [address]: amount };
+
+    // Add change output if needed (send back to source address)
+    const change = total - targetAmount;
+    if (change > 0.00001) { // Dust threshold
+      const changeAddress = selected[0].address; // Use source address for change
+      outputs[changeAddress] = parseFloat(change.toFixed(8));
+    }
+
+    // 5. Create raw transaction
+    const rawTx = await btqRPC('createrawtransaction', [inputs, outputs]);
+
+    // 6. Sign with Dilithium
+    const signedTx = await btqRPC('signtransactionwithdilithium', [rawTx]);
+
+    if (!signedTx.complete) {
+      throw new Error('Transaction signing incomplete');
+    }
+
+    // 7. Send transaction
+    const txid = await btqRPC('sendrawtransaction', [signedTx.hex]);
+
+    return txid;
+  } catch (error) {
+    if (error.message.includes('locked')) {
+      throw new Error('Wallet is locked. Please unlock with: btq-cli -rpcwallet=faucet walletpassphrase <passphrase> 60');
+    }
+    throw error;
+  }
+}
+
+// API Endpoints
+
+// POST /api/mining/start
+app.post('/api/mining/start', (req, res) => {
+  try {
+    const { address } = req.body;
+
+    if (!validateAddress(address)) {
+      return res.status(400).json({ error: 'Invalid address' });
+    }
+
+    const existing = db.getActiveSessionByAddress(address);
+    if (existing) {
+      return res.status(409).json({
+        error: 'Active session already exists for this address',
+        sessionId: existing.session_id
+      });
+    }
+
+    const ip = getClientIP(req);
+    const sessionId = crypto.randomBytes(16).toString('hex');
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const startedAt = nowSec();
+
+    const session = {
+      sessionId,
+      address,
+      nonce,
+      baseDifficulty: CONFIG.DIFFICULTY_BASE,
+      currentDifficulty: CONFIG.DIFFICULTY_BASE,
+      startedAt,
+      ipHash: hashIP(ip)
+    };
+
+    db.insertSession(session);
+
+    res.json({
+      sessionId,
+      nonce,
+      difficulty: CONFIG.DIFFICULTY_BASE,
+      startedAt,
+      minClaim: CONFIG.MIN_CLAIM
+    });
+  } catch (error) {
+    console.error('Start mining error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/mining/stop
+app.post('/api/mining/stop', (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+
+    const session = db.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status !== 'active') {
+      return res.status(400).json({ error: `Session is ${session.status}` });
+    }
+
+    const now = nowSec();
+    let activeSeconds = session.active_seconds || 0;
+
+    const lastActivity = session.last_share_at || session.started_at;
+    if (lastActivity) {
+      const delta = Math.min(now - lastActivity, CONFIG.ACTIVE_SHARE_WINDOW);
+      if (delta > 0) {
+        activeSeconds += delta;
+      }
+    }
+
+    const accrued = computeAccrued(activeSeconds);
+    const difficulty = computeDifficulty(session.base_difficulty, activeSeconds);
+
+    db.stopSession(sessionId, {
+      stoppedAt: now,
+      activeSeconds,
+      accrued,
+      currentDifficulty: difficulty
+    });
+
+    res.json({
+      sessionId,
+      activeSeconds,
+      accrued,
+      difficulty,
+      minClaim: CONFIG.MIN_CLAIM
+    });
+  } catch (error) {
+    console.error('Stop mining error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/mining/claim
+app.post('/api/mining/claim', async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+
+    const session = db.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status === 'claimed') {
+      return res.status(400).json({ error: 'Session already claimed' });
+    }
+
+    if (session.status !== 'stopped') {
+      return res.status(400).json({ error: 'Session must be stopped before claiming' });
+    }
+
+    const accrued = session.accrued || 0;
+    if (accrued < CONFIG.MIN_CLAIM) {
+      return res.status(400).json({
+        error: 'Minimum claim not reached',
+        minClaim: CONFIG.MIN_CLAIM,
+        accrued
+      });
+    }
+
+    const amount = parseFloat(accrued.toFixed(8));
+
+    let txid;
+    try {
+      txid = await sendDilithiumTx(session.address, amount, CONFIG.FAUCET_FEE);
+    } catch (error) {
+      db.insertPayout({
+        sessionId,
+        address: session.address,
+        amount,
+        txid: null,
+        status: 'failed'
+      });
+
+      if (error.message.includes('locked')) {
+        return res.status(503).json({ error: error.message });
+      }
+      if (error.message.includes('Insufficient')) {
+        const balance = await btqRPC('getbalance');
+        return res.status(503).json({
+          error: 'Faucet has insufficient funds',
+          balance: balance
+        });
+      }
+      throw error;
+    }
+
+    db.insertPayout({
+      sessionId,
+      address: session.address,
+      amount,
+      txid,
+      status: 'success'
+    });
+
+    db.markSessionClaimed(sessionId, {
+      claimedAt: nowSec(),
+      txid
+    });
+
+    res.json({
+      success: true,
+      txid,
+      amount
+    });
+  } catch (error) {
+    console.error('Claim error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/health
+app.get('/api/health', async (req, res) => {
+  try {
+    // Test RPC connection
+    const balance = await btqRPC('getbalance');
+    const walletInfo = await btqRPC('getwalletinfo');
+
+    res.json({
+      status: 'ok',
+      balance: balance,
+      rpc: 'ok',
+      walletLoaded: true,
+      walletUnlocked: !walletInfo.unlocked_until || walletInfo.unlocked_until > 0
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      rpc: 'fail',
+      error: error.message
+    });
+  }
+});
+
+// Deprecated endpoints (single-shot PoW flow)
+app.get('/api/challenge', (req, res) => {
+  res.status(410).json({ error: 'Deprecated. Use /api/mining/start and WebSocket shares.' });
+});
+
+app.post('/api/claim', (req, res) => {
+  res.status(410).json({ error: 'Deprecated. Use /api/mining/stop and /api/mining/claim.' });
+});
+
+// Periodic cleanup (every hour)
+setInterval(() => {
+  try {
+    const now = nowSec();
+    const cutoff = now - CONFIG.SESSION_EXPIRE_SECONDS;
+    const expired = db.expireStaleSessions(cutoff);
+    if (expired.changes > 0) {
+      console.log(`Expired ${expired.changes} stale sessions`);
+    }
+  } catch (error) {
+    console.error('Cleanup error:', error);
+  }
+}, 3600000);
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+wss.on('connection', (ws) => {
+  ws.on('message', (data) => {
+    let message;
+    try {
+      message = JSON.parse(data.toString());
+    } catch (error) {
+      ws.send(JSON.stringify({ type: 'error', error: 'Invalid JSON' }));
+      return;
+    }
+
+    if (message.type !== 'share') {
+      ws.send(JSON.stringify({ type: 'error', error: 'Unsupported message type' }));
+      return;
+    }
+
+    const { sessionId, counter } = message;
+    if (!sessionId || counter === undefined) {
+      ws.send(JSON.stringify({ type: 'error', error: 'Missing sessionId or counter' }));
+      return;
+    }
+
+    const session = db.getSession(sessionId);
+    if (!session) {
+      ws.send(JSON.stringify({ type: 'error', error: 'Session not found' }));
+      return;
+    }
+
+    if (session.status !== 'active') {
+      ws.send(JSON.stringify({ type: 'error', error: `Session is ${session.status}` }));
+      return;
+    }
+
+    const now = nowSec();
+    const lastActivity = session.last_share_at || session.started_at;
+    if (now - lastActivity > CONFIG.SESSION_EXPIRE_SECONDS) {
+      db.expireSession(sessionId, { expiredAt: now });
+      ws.send(JSON.stringify({ type: 'error', error: 'Session expired' }));
+      return;
+    }
+
+    if (counter <= session.last_counter) {
+      ws.send(JSON.stringify({ type: 'error', error: 'Stale share' }));
+      return;
+    }
+
+    const difficultyBefore = session.current_difficulty;
+    const input = `${session.nonce}:${session.address}:${counter}`;
+    const hash = crypto.createHash('sha256').update(input).digest('hex');
+    const target = '0'.repeat(difficultyBefore);
+
+    if (!hash.startsWith(target)) {
+      ws.send(JSON.stringify({ type: 'error', error: 'Invalid share' }));
+      return;
+    }
+
+    let activeSeconds = session.active_seconds || 0;
+    const lastActivity = session.last_share_at || session.started_at;
+    if (lastActivity) {
+      const delta = Math.min(now - lastActivity, CONFIG.ACTIVE_SHARE_WINDOW);
+      if (delta > 0) {
+        activeSeconds += delta;
+      }
+    }
+
+    const difficultyAfter = computeDifficulty(session.base_difficulty, activeSeconds);
+    const accrued = computeAccrued(activeSeconds);
+
+    db.updateSessionShare(sessionId, {
+      lastShareAt: now,
+      lastCounter: counter,
+      activeSeconds,
+      currentDifficulty: difficultyAfter,
+      accrued
+    });
+
+    db.insertShare({
+      sessionId,
+      counter,
+      difficulty: difficultyBefore
+    });
+
+    ws.send(JSON.stringify({
+      type: 'accepted',
+      sessionId,
+      activeSeconds,
+      accrued,
+      difficulty: difficultyAfter
+    }));
+  });
+});
+
+// Start server
+server.listen(CONFIG.PORT, () => {
+  console.log(`BTQ Faucet running on port ${CONFIG.PORT}`);
+  console.log(`RPC: ${CONFIG.RPC_HOST}:${CONFIG.RPC_PORT}`);
+  console.log(`Wallet: ${CONFIG.RPC_WALLET}`);
+  console.log(`Reward: ${CONFIG.REWARD_PER_MINUTE} BTQ/min`);
+  console.log(`Min claim: ${CONFIG.MIN_CLAIM} BTQ`);
+  console.log(`Difficulty base: ${CONFIG.DIFFICULTY_BASE}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\nShutting down...');
+  db.close();
+  process.exit(0);
+});

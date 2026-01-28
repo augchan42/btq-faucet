@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bitcoin Quantum Testnet Faucet</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0d47a1, #1976d2);
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      max-width: 520px;
+      width: 100%;
+    }
+
+    h1 {
+      margin: 0 0 5px 0;
+      font-size: 28px;
+      color: #1a237e;
+      text-align: center;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    input:focus {
+      border-color: #1976d2;
+      outline: none;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      flex: 1;
+      background: #1976d2;
+      color: white;
+      border: none;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      background: #1565c0;
+    }
+
+    button:disabled {
+      background: #b0bec5;
+      cursor: not-allowed;
+    }
+
+    .secondary {
+      background: #455a64;
+    }
+
+    .secondary:hover:not(:disabled) {
+      background: #37474f;
+    }
+
+    .success-btn {
+      background: #2e7d32;
+    }
+
+    .success-btn:hover:not(:disabled) {
+      background: #1b5e20;
+    }
+
+    .mining-status {
+      display: none;
+      margin-top: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 6px;
+    }
+
+    .mining-status.active {
+      display: block;
+    }
+
+    .status-text {
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: #1a237e;
+    }
+
+    .progress-bar {
+      background: #e0e0e0;
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #4caf50;
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    .hash-rate,
+    .attempts,
+    .stat-line {
+      color: #555;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .message {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .footer {
+      margin-top: 30px;
+      text-align: center;
+      color: white;
+      font-size: 14px;
+    }
+
+    .footer a {
+      color: white;
+      text-decoration: underline;
+    }
+
+    .info-box {
+      background: #e3f2fd;
+      border-left: 4px solid #2196f3;
+      padding: 12px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #1565c0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚛️ Bitcoin Quantum Faucet</h1>
+    <p class="subtitle">Testnet Mining Faucet</p>
+
+    <div class="info-box">
+      Enter your BTQ testnet address and start mining. Rewards accrue at 0.01 BTQ/minute of active mining.
+      Stop mining to claim once you reach at least 0.01 BTQ.
+    </div>
+
+    <form id="faucet-form">
+      <div class="form-group">
+        <label for="address">Dilithium Address</label>
+        <input
+          type="text"
+          id="address"
+          placeholder="nTb8m... or tbtq1q..."
+          required
+        >
+      </div>
+      <div class="button-row">
+        <button type="submit" id="start-btn">Start Mining</button>
+        <button type="button" id="stop-btn" class="secondary">Stop</button>
+        <button type="button" id="claim-btn" class="success-btn">Claim</button>
+      </div>
+    </form>
+
+    <div class="mining-status" id="mining-status">
+      <div class="status-text" id="status-text">Ready</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div class="hash-rate" id="hash-rate">Hash rate: 0 H/s</div>
+      <div class="attempts" id="attempts">Attempts: 0</div>
+      <div class="stat-line" id="difficulty">Difficulty: -</div>
+      <div class="stat-line" id="active-time">Active time: 0m 0s</div>
+      <div class="stat-line" id="accrued">Accrued: 0.0000 BTQ</div>
+    </div>
+
+    <div class="message" id="message"></div>
+  </div>
+
+  <div class="footer">
+    Powered by Bitcoin Quantum |
+    <a href="https://github.com/bitcoinquantum/btq-core" target="_blank">GitHub</a>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
