@@ -507,6 +507,7 @@ async function startMiningWithSession() {
 
     miningActive = true;
     updateMiningStats();
+    setButtonLoading(mineMoreBtn, false);
     setState(AppState.MINING);
 
     createWorker(currentSession, currentAddress);
