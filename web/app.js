@@ -375,6 +375,18 @@ async function startMining() {
         updateMiningStats();
       }
 
+      if (data.type === 'session_complete') {
+        miningActive = false;
+        stopWorker();
+        closeWebSocket();
+        activeSeconds = data.activeSeconds;
+        accrued = data.accrued;
+        updateMiningStats();
+        miningHero.classList.remove('pulse');
+        showMessage(data.message || 'Session complete');
+        setState(AppState.CLAIMABLE);
+      }
+
       if (data.type === 'error') {
         miningActive = false;
         stopWorker();
@@ -528,6 +540,18 @@ async function startMiningWithSession() {
           }
         }
         updateMiningStats();
+      }
+
+      if (data.type === 'session_complete') {
+        miningActive = false;
+        stopWorker();
+        closeWebSocket();
+        activeSeconds = data.activeSeconds;
+        accrued = data.accrued;
+        updateMiningStats();
+        miningHero.classList.remove('pulse');
+        showMessage(data.message || 'Session complete');
+        setState(AppState.CLAIMABLE);
       }
 
       if (data.type === 'error') {

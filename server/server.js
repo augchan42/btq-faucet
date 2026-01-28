@@ -21,6 +21,7 @@ const CONFIG = {
   DIFFICULTY_BASE: parseInt(process.env.DIFFICULTY_BASE || '4'),
   DIFFICULTY_STEP_SECONDS: parseInt(process.env.DIFFICULTY_STEP_SECONDS || '300'),
   ACTIVE_SHARE_WINDOW: parseInt(process.env.ACTIVE_SHARE_WINDOW || '30'),
+  MAX_SESSION_SECONDS: parseInt(process.env.MAX_SESSION_SECONDS || '150'), // 2.5 minutes
   SESSION_EXPIRE_SECONDS: parseInt(process.env.SESSION_EXPIRE_SECONDS || '3600'),
   IP_SALT: process.env.IP_SALT || crypto.randomBytes(32).toString('hex'),
   PORT: parseInt(process.env.PORT || '3000'),
@@ -584,6 +585,27 @@ wss.on('connection', (ws) => {
       if (delta > 0) {
         activeSeconds += delta;
       }
+    }
+
+    // Cap session at MAX_SESSION_SECONDS
+    if (activeSeconds >= CONFIG.MAX_SESSION_SECONDS) {
+      activeSeconds = CONFIG.MAX_SESSION_SECONDS;
+      const accrued = computeAccrued(activeSeconds);
+
+      db.stopSession(sessionId, {
+        stoppedAt: now,
+        activeSeconds,
+        currentDifficulty: session.current_difficulty,
+        accrued
+      });
+
+      ws.send(JSON.stringify({
+        type: 'session_complete',
+        activeSeconds,
+        accrued,
+        message: 'Maximum session time reached'
+      }));
+      return;
     }
 
     const difficultyAfter = computeDifficulty(session.base_difficulty, activeSeconds);
