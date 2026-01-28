@@ -238,14 +238,6 @@ app.post('/api/mining/start', async (req, res) => {
       }
     }
 
-    const existing = db.getActiveSessionByAddress(address);
-    if (existing) {
-      return res.status(409).json({
-        error: 'Active session already exists for this address',
-        sessionId: existing.session_id
-      });
-    }
-
     const ip = getClientIP(req);
     const sessionId = crypto.randomBytes(16).toString('hex');
     const nonce = crypto.randomBytes(16).toString('hex');
