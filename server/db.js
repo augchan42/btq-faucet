@@ -230,6 +230,17 @@ class FaucetDB {
     );
   }
 
+  resumeSession(sessionId) {
+    const stmt = this.db.prepare(`
+      UPDATE sessions
+      SET status = 'active',
+          stopped_at = NULL
+      WHERE session_id = ? AND status = 'stopped'
+    `);
+
+    return stmt.run(sessionId);
+  }
+
   markSessionClaimed(sessionId, updates) {
     const stmt = this.db.prepare(`
       UPDATE sessions

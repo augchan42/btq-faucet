@@ -320,6 +320,39 @@ app.post('/api/mining/stop', (req, res) => {
   }
 });
 
+// POST /api/mining/resume
+app.post('/api/mining/resume', (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+
+    const session = db.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status !== 'stopped') {
+      return res.status(400).json({ error: `Cannot resume: session is ${session.status}` });
+    }
+
+    db.resumeSession(sessionId);
+
+    res.json({
+      sessionId,
+      status: 'active',
+      accrued: session.accrued || 0,
+      activeSeconds: session.active_seconds || 0,
+      difficulty: session.current_difficulty || session.base_difficulty
+    });
+  } catch (error) {
+    console.error('Resume mining error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // POST /api/mining/claim
 app.post('/api/mining/claim', async (req, res) => {
   try {

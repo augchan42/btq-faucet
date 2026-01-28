@@ -443,6 +443,18 @@ async function startMiningWithSession() {
   setButtonLoading(mineMoreBtn, true, 'Resuming...');
 
   try {
+    // Resume the session on the server first
+    const resumeResponse = await fetch('/api/mining/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: currentSession.sessionId })
+    });
+
+    if (!resumeResponse.ok) {
+      const data = await resumeResponse.json();
+      throw new Error(data.error || 'Failed to resume session');
+    }
+
     ws = await connectWebSocket();
 
     ws.addEventListener('close', () => {
