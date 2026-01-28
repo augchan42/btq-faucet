@@ -398,7 +398,7 @@
       color: rgba(255, 255, 255, 0.5);
     }
 
-    /* Technical details (collapsible) */
+    /* Technical details */
     .tech-details {
       margin: 16px 0;
       padding: 14px 16px;
@@ -409,32 +409,16 @@
       color: rgba(255, 255, 255, 0.6);
     }
 
-    .tech-details summary {
-      cursor: pointer;
+    .tech-details .title {
       color: var(--primary);
       font-weight: 500;
-      user-select: none;
-      list-style: none;
-    }
-
-    .tech-details summary::-webkit-details-marker {
-      display: none;
-    }
-
-    .tech-details summary::before {
-      content: '+ ';
-      font-family: var(--font-dm-mono);
-    }
-
-    .tech-details[open] summary::before {
-      content: '- ';
+      margin-bottom: 12px;
     }
 
     .tech-details .detail-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
-      margin-top: 14px;
     }
 
     .tech-details .detail-item {
@@ -660,8 +644,8 @@
         <span class="progress-label" id="progress-label">0% to minimum claim (0.01 BTQ)</span>
       </div>
 
-      <details class="tech-details">
-        <summary>Technical Details</summary>
+      <div class="tech-details">
+        <div class="title">Technical Details</div>
         <div class="detail-grid">
           <div class="detail-item">
             <span class="detail-label">Hash Rate</span>
@@ -680,7 +664,7 @@
             <span class="detail-value" id="active-time">0m 0s</span>
           </div>
         </div>
-      </details>
+      </div>
 
       <button id="stop-btn" class="btn btn-secondary btn-full">
         Stop Mining
