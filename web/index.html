@@ -689,6 +689,20 @@
       </div>
     </section>
 
+    <!-- State: Claimed (success) -->
+    <section id="state-claimed" class="state">
+      <div class="success-card">
+        <p>Successfully claimed</p>
+        <div class="amount-large" id="claimed-amount">0.0000 BTQ</div>
+        <p style="margin-top: 16px; font-size: 13px; color: rgba(255,255,255,0.6);">Transaction ID:</p>
+        <a id="claimed-txid" href="#" target="_blank" style="word-break: break-all; font-size: 12px; color: var(--primary);">...</a>
+      </div>
+
+      <button id="new-session-btn" class="btn btn-primary btn-full" style="margin-top: 20px;">
+        Start New Session
+      </button>
+    </section>
+
     <!-- Message area -->
     <div id="message" class="message">
       <button class="dismiss" onclick="dismissMessage()">&times;</button>

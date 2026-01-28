@@ -2,7 +2,8 @@
 const AppState = {
   READY: 'ready',
   MINING: 'mining',
-  CLAIMABLE: 'claimable'
+  CLAIMABLE: 'claimable',
+  CLAIMED: 'claimed'
 };
 
 // State
@@ -23,6 +24,7 @@ let captchaEnabled = false;
 const stateReady = document.getElementById('state-ready');
 const stateMining = document.getElementById('state-mining');
 const stateClaimable = document.getElementById('state-claimable');
+const stateClaimed = document.getElementById('state-claimed');
 
 // DOM Elements - Ready state
 const addressInput = document.getElementById('address');
@@ -47,6 +49,9 @@ const timeSpent = document.getElementById('time-spent');
 const claimBtn = document.getElementById('claim-btn');
 const mineMoreBtn = document.getElementById('mine-more-btn');
 
+// DOM Elements - Claimed state
+const newSessionBtn = document.getElementById('new-session-btn');
+
 // DOM Elements - Messages
 const messageEl = document.getElementById('message');
 const messageText = document.getElementById('message-text');
@@ -59,6 +64,7 @@ function setState(newState) {
   stateReady.classList.remove('active');
   stateMining.classList.remove('active');
   stateClaimable.classList.remove('active');
+  stateClaimed.classList.remove('active');
 
   // Show the active section
   switch (newState) {
@@ -83,6 +89,10 @@ function setState(newState) {
     case AppState.CLAIMABLE:
       stateClaimable.classList.add('active');
       updateClaimableUI();
+      break;
+
+    case AppState.CLAIMED:
+      stateClaimed.classList.add('active');
       break;
   }
 }
@@ -396,23 +406,20 @@ async function claimRewards() {
 
   try {
     const result = await claimSession(currentSession.sessionId);
+    const claimedAmount = accrued;
 
-    // Celebration animation
-    successCard.classList.add('celebrate');
-    setTimeout(() => successCard.classList.remove('celebrate'), 300);
-
-    showSuccess(result.txid);
+    // Update claimed state UI
+    document.getElementById('claimed-amount').textContent = `${formatBTQ(claimedAmount)} BTQ`;
+    document.getElementById('claimed-txid').href = `https://explorer.bitcoinquantum.com/tx/${result.txid}`;
+    document.getElementById('claimed-txid').textContent = result.txid;
 
     // Reset for new session
     currentSession = null;
     accrued = 0;
     activeSeconds = 0;
 
-    // Show ready state after a moment
-    setTimeout(() => {
-      dismissMessage();
-      setState(AppState.READY);
-    }, 5000);
+    // Show claimed state
+    setState(AppState.CLAIMED);
 
   } catch (error) {
     showError(error.message);
@@ -519,6 +526,10 @@ claimBtn.addEventListener('click', () => {
 
 mineMoreBtn.addEventListener('click', () => {
   mineMore();
+});
+
+newSessionBtn.addEventListener('click', () => {
+  setState(AppState.READY);
 });
 
 // Cleanup on page unload
