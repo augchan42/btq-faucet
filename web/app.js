@@ -392,6 +392,7 @@ async function stopMining() {
     currentDifficulty = data.difficulty;
     minClaim = data.minClaim || minClaim;
 
+    setButtonLoading(stopBtn, false);
     setState(AppState.CLAIMABLE);
 
   } catch (error) {
