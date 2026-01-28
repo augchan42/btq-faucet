@@ -563,6 +563,28 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // Check wall-clock session duration cap
+    const sessionDuration = now - session.started_at;
+    if (sessionDuration >= CONFIG.MAX_SESSION_SECONDS) {
+      const activeSeconds = session.active_seconds || 0;
+      const accrued = computeAccrued(activeSeconds);
+
+      db.stopSession(sessionId, {
+        stoppedAt: now,
+        activeSeconds,
+        currentDifficulty: session.current_difficulty,
+        accrued
+      });
+
+      ws.send(JSON.stringify({
+        type: 'session_complete',
+        activeSeconds,
+        accrued,
+        message: 'Maximum session time reached'
+      }));
+      return;
+    }
+
     if (counter <= session.last_counter) {
       ws.send(JSON.stringify({ type: 'error', error: 'Stale share' }));
       return;
@@ -585,27 +607,6 @@ wss.on('connection', (ws) => {
       if (delta > 0) {
         activeSeconds += delta;
       }
-    }
-
-    // Cap session at MAX_SESSION_SECONDS
-    if (activeSeconds >= CONFIG.MAX_SESSION_SECONDS) {
-      activeSeconds = CONFIG.MAX_SESSION_SECONDS;
-      const accrued = computeAccrued(activeSeconds);
-
-      db.stopSession(sessionId, {
-        stoppedAt: now,
-        activeSeconds,
-        currentDifficulty: session.current_difficulty,
-        accrued
-      });
-
-      ws.send(JSON.stringify({
-        type: 'session_complete',
-        activeSeconds,
-        accrued,
-        message: 'Maximum session time reached'
-      }));
-      return;
     }
 
     const difficultyAfter = computeDifficulty(session.base_difficulty, activeSeconds);
