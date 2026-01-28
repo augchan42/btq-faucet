@@ -106,7 +106,7 @@ function formatBTQ(amount) {
 // UI Updates
 function updateMiningStats() {
   accruedAmount.textContent = formatBTQ(accrued);
-  difficultyEl.textContent = currentDifficulty;
+  difficultyEl.textContent = '0'.repeat(currentDifficulty) + '...';
   activeTimeEl.textContent = formatSeconds(activeSeconds);
 
   // Update progress bar (progress toward minClaim)
