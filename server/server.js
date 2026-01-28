@@ -12,6 +12,7 @@ const CONFIG = {
   RPC_USER: process.env.RPC_USER || 'btqrpc',
   RPC_PASS: process.env.RPC_PASS || '',
   RPC_WALLET: process.env.RPC_WALLET || 'faucet',
+  FAUCET_ADDRESS: process.env.FAUCET_ADDRESS || '', // Main faucet address for change
   FAUCET_FEE: parseFloat(process.env.FAUCET_FEE || '0.0001'),
   REWARD_PER_MINUTE: parseFloat(process.env.REWARD_PER_MINUTE || '0.01'),
   MIN_CLAIM: parseFloat(process.env.MIN_CLAIM || '0.01'),
@@ -141,10 +142,11 @@ async function sendDilithiumTx(address, amount, fee) {
     // 4. Prepare outputs
     const outputs = { [address]: amount };
 
-    // Add change output if needed (send back to source address)
+    // Add change output if needed (send to faucet address or source)
     const change = total - targetAmount;
     if (change > 0.00001) { // Dust threshold
-      const changeAddress = selected[0].address; // Use source address for change
+      // Use configured faucet address, or fallback to source address
+      const changeAddress = CONFIG.FAUCET_ADDRESS || selected[0].address;
       outputs[changeAddress] = parseFloat(change.toFixed(8));
     }
 
