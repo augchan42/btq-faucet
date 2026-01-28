@@ -100,8 +100,37 @@ function computeAccrued(activeSeconds) {
   return (activeSeconds / 60) * CONFIG.REWARD_PER_MINUTE;
 }
 
+// BTQ address formats:
+// - Dilithium testnet: starts with 'n' (base58, ~50 chars)
+// - Dilithium mainnet: starts with 'd' (base58, ~50 chars)
+// - SegWit testnet: starts with 'tbtq1q' (bech32)
+// - SegWit mainnet: starts with 'btq1q' (bech32)
+// - Legacy testnet: starts with 'm' or 'n' (but shorter than Dilithium)
+// - Legacy mainnet: starts with 'B'
+
+function getAddressType(address) {
+  if (!address || typeof address !== 'string') return null;
+
+  // Dilithium addresses (base58, longer ~50 chars)
+  if (/^[nd][a-km-zA-HJ-NP-Z1-9]{40,60}$/.test(address)) {
+    return 'dilithium';
+  }
+
+  // SegWit bech32 addresses
+  if (/^(tbtq1q|btq1q)[a-z0-9]{38,}$/.test(address)) {
+    return 'segwit';
+  }
+
+  // Legacy addresses (shorter base58)
+  if (/^[mMnNB][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(address)) {
+    return 'legacy';
+  }
+
+  return null;
+}
+
 function validateAddress(address) {
-  return address && address.length > 0;
+  return getAddressType(address) !== null;
 }
 
 // Verify hCaptcha token
@@ -152,8 +181,8 @@ function selectCoins(utxos, targetAmount) {
   throw new Error('Insufficient funds');
 }
 
-// Send transaction using Dilithium signing
-async function sendDilithiumTx(address, amount, fee) {
+// Send transaction with automatic signing method detection
+async function sendTx(address, amount, fee) {
   try {
     // 1. List unspent outputs (including unconfirmed)
     const utxos = await btqRPC('listunspent', [0]);
@@ -166,13 +195,21 @@ async function sendDilithiumTx(address, amount, fee) {
     const targetAmount = amount + fee;
     const { selected, total } = selectCoins(utxos, targetAmount);
 
-    // 3. Prepare inputs
+    // 3. Determine signing method based on UTXO address types
+    const hasDilithiumInputs = selected.some(utxo => getAddressType(utxo.address) === 'dilithium');
+    const hasStandardInputs = selected.some(utxo => getAddressType(utxo.address) !== 'dilithium');
+
+    if (hasDilithiumInputs && hasStandardInputs) {
+      throw new Error('Cannot mix Dilithium and standard inputs in one transaction');
+    }
+
+    // 4. Prepare inputs
     const inputs = selected.map(utxo => ({
       txid: utxo.txid,
       vout: utxo.vout
     }));
 
-    // 4. Prepare outputs
+    // 5. Prepare outputs
     const outputs = { [address]: amount };
 
     // Add change output if needed (send to faucet address or source)
@@ -183,11 +220,12 @@ async function sendDilithiumTx(address, amount, fee) {
       outputs[changeAddress] = parseFloat(change.toFixed(8));
     }
 
-    // 5. Create raw transaction
+    // 6. Create raw transaction
     const rawTx = await btqRPC('createrawtransaction', [inputs, outputs]);
 
-    // 6. Sign with Dilithium
-    const signedTx = await btqRPC('signtransactionwithdilithium', [rawTx]);
+    // 7. Sign with appropriate method
+    const signMethod = hasDilithiumInputs ? 'signtransactionwithdilithium' : 'signrawtransactionwithwallet';
+    const signedTx = await btqRPC(signMethod, [rawTx]);
 
     if (!signedTx.complete) {
       throw new Error('Transaction signing incomplete');
@@ -388,7 +426,7 @@ app.post('/api/mining/claim', async (req, res) => {
 
     let txid;
     try {
-      txid = await sendDilithiumTx(session.address, amount, CONFIG.FAUCET_FEE);
+      txid = await sendTx(session.address, amount, CONFIG.FAUCET_FEE);
     } catch (error) {
       db.insertPayout({
         sessionId,
