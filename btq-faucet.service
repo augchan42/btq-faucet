@@ -1,0 +1,40 @@
+# BTQ Faucet systemd service file
+# Alternative to PM2 for process management
+#
+# Installation:
+#   sudo cp btq-faucet.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable btq-faucet
+#   sudo systemctl start btq-faucet
+
+[Unit]
+Description=BTQ Faucet Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/btq-faucet
+ExecStart=/usr/bin/node server/server.js
+Restart=on-failure
+RestartSec=10
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3000
+EnvironmentFile=/var/www/btq-faucet/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/www/btq-faucet
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target
