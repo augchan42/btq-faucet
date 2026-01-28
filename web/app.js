@@ -379,12 +379,13 @@ async function stopMining() {
   setButtonLoading(stopBtn, true, 'Stopping...');
   miningHero.classList.remove('pulse');
 
+  // Set miningActive false BEFORE closing WebSocket to prevent "Connection lost" message
+  miningActive = false;
   stopWorker();
   closeWebSocket();
 
   try {
     const data = await stopSession(currentSession.sessionId);
-    miningActive = false;
 
     activeSeconds = data.activeSeconds;
     accrued = data.accrued;
