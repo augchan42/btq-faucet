@@ -458,9 +458,9 @@ wss.on('connection', (ws) => {
     }
 
     let activeSeconds = session.active_seconds || 0;
-    const lastActivity = session.last_share_at || session.started_at;
-    if (lastActivity) {
-      const delta = Math.min(now - lastActivity, CONFIG.ACTIVE_SHARE_WINDOW);
+    const lastShareTime = session.last_share_at || session.started_at;
+    if (lastShareTime) {
+      const delta = Math.min(now - lastShareTime, CONFIG.ACTIVE_SHARE_WINDOW);
       if (delta > 0) {
         activeSeconds += delta;
       }
