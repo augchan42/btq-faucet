@@ -547,10 +547,29 @@ async function initialize() {
 
     if (config.captchaSiteKey) {
       captchaEnabled = true;
-      // Set the site key on the captcha widget
-      const captchaWidget = document.querySelector('.h-captcha');
-      if (captchaWidget) {
-        captchaWidget.setAttribute('data-sitekey', config.captchaSiteKey);
+      // Wait for hCaptcha to load, then render explicitly
+      const renderCaptcha = () => {
+        const captchaContainer = document.querySelector('.h-captcha');
+        if (captchaContainer) {
+          hcaptcha.render(captchaContainer, {
+            sitekey: config.captchaSiteKey,
+            theme: 'dark',
+            callback: 'onCaptchaVerified',
+            'expired-callback': 'onCaptchaExpired'
+          });
+        }
+      };
+
+      if (typeof hcaptcha !== 'undefined') {
+        renderCaptcha();
+      } else {
+        // Wait for hCaptcha script to load
+        const checkInterval = setInterval(() => {
+          if (typeof hcaptcha !== 'undefined') {
+            clearInterval(checkInterval);
+            renderCaptcha();
+          }
+        }, 100);
       }
       // Keep start button disabled until captcha is verified
       startBtn.disabled = true;
