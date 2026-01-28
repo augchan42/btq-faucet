@@ -155,8 +155,8 @@ function selectCoins(utxos, targetAmount) {
 // Send transaction using Dilithium signing
 async function sendDilithiumTx(address, amount, fee) {
   try {
-    // 1. List unspent outputs
-    const utxos = await btqRPC('listunspent');
+    // 1. List unspent outputs (including unconfirmed)
+    const utxos = await btqRPC('listunspent', [0]);
 
     if (!utxos || utxos.length === 0) {
       throw new Error('No UTXOs available');
