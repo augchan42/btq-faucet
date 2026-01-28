@@ -1,4 +1,12 @@
+// Application State
+const AppState = {
+  READY: 'ready',
+  MINING: 'mining',
+  CLAIMABLE: 'claimable'
+};
+
 // State
+let currentState = AppState.READY;
 let miningWorker = null;
 let miningActive = false;
 let ws = null;
@@ -7,26 +15,82 @@ let currentDifficulty = 0;
 let activeSeconds = 0;
 let accrued = 0;
 let minClaim = 0.01;
+let currentAddress = '';
+let captchaToken = null;
+let captchaEnabled = false;
 
-// DOM Elements
-const form = document.getElementById('faucet-form');
+// DOM Elements - Sections
+const stateReady = document.getElementById('state-ready');
+const stateMining = document.getElementById('state-mining');
+const stateClaimable = document.getElementById('state-claimable');
+
+// DOM Elements - Ready state
 const addressInput = document.getElementById('address');
 const startBtn = document.getElementById('start-btn');
-const stopBtn = document.getElementById('stop-btn');
-const claimBtn = document.getElementById('claim-btn');
-const miningStatus = document.getElementById('mining-status');
-const statusText = document.getElementById('status-text');
-const progressFill = document.getElementById('progress-fill');
-const hashRateEl = document.getElementById('hash-rate');
-const attemptsEl = document.getElementById('attempts');
-const difficultyEl = document.getElementById('difficulty');
-const activeTimeEl = document.getElementById('active-time');
-const accruedEl = document.getElementById('accrued');
-const messageEl = document.getElementById('message');
 
-// Validate Dilithium address format
-function validateAddress(address) {
-  return address && address.length > 0;
+// DOM Elements - Mining state
+const addressBadge = document.getElementById('address-badge');
+const miningHero = document.getElementById('mining-hero');
+const accruedAmount = document.getElementById('accrued-amount');
+const progressFill = document.getElementById('progress-fill');
+const progressLabel = document.getElementById('progress-label');
+const hashRateEl = document.getElementById('hash-rate');
+const difficultyEl = document.getElementById('difficulty');
+const attemptsEl = document.getElementById('attempts');
+const activeTimeEl = document.getElementById('active-time');
+const stopBtn = document.getElementById('stop-btn');
+
+// DOM Elements - Claimable state
+const successCard = document.getElementById('success-card');
+const finalAmount = document.getElementById('final-amount');
+const timeSpent = document.getElementById('time-spent');
+const claimBtn = document.getElementById('claim-btn');
+const mineMoreBtn = document.getElementById('mine-more-btn');
+
+// DOM Elements - Messages
+const messageEl = document.getElementById('message');
+const messageText = document.getElementById('message-text');
+
+// State Management
+function setState(newState) {
+  currentState = newState;
+
+  // Hide all state sections
+  stateReady.classList.remove('active');
+  stateMining.classList.remove('active');
+  stateClaimable.classList.remove('active');
+
+  // Show the active section
+  switch (newState) {
+    case AppState.READY:
+      stateReady.classList.add('active');
+      addressInput.disabled = false;
+      // Only enable start button if captcha is verified (or captcha is disabled)
+      startBtn.disabled = captchaEnabled && !captchaToken;
+      startBtn.innerHTML = 'Start Mining';
+      // Reset captcha when returning to ready state
+      if (typeof hcaptcha !== 'undefined' && captchaEnabled) {
+        hcaptcha.reset();
+        captchaToken = null;
+      }
+      break;
+
+    case AppState.MINING:
+      stateMining.classList.add('active');
+      miningHero.classList.add('pulse');
+      break;
+
+    case AppState.CLAIMABLE:
+      stateClaimable.classList.add('active');
+      updateClaimableUI();
+      break;
+  }
+}
+
+// Utilities
+function truncateAddress(address) {
+  if (!address || address.length < 12) return address;
+  return `${address.slice(0, 8)}...${address.slice(-6)}`;
 }
 
 function formatSeconds(totalSeconds) {
@@ -35,53 +99,70 @@ function formatSeconds(totalSeconds) {
   return `${minutes}m ${seconds}s`;
 }
 
-function updateStats() {
-  difficultyEl.textContent = `Difficulty: ${currentDifficulty}`;
-  activeTimeEl.textContent = `Active time: ${formatSeconds(activeSeconds)}`;
-  accruedEl.textContent = `Accrued: ${accrued.toFixed(4)} BTQ`;
+function formatBTQ(amount) {
+  return amount.toFixed(4);
+}
 
-  if (!miningActive && accrued >= minClaim && currentSession) {
-    claimBtn.disabled = false;
+// UI Updates
+function updateMiningStats() {
+  accruedAmount.textContent = formatBTQ(accrued);
+  difficultyEl.textContent = currentDifficulty;
+  activeTimeEl.textContent = formatSeconds(activeSeconds);
+
+  // Update progress bar (progress toward minClaim)
+  const progressPercent = Math.min((accrued / minClaim) * 100, 100);
+  progressFill.style.width = `${progressPercent}%`;
+  progressLabel.textContent = `${Math.floor(progressPercent)}% to minimum claim (${minClaim} BTQ)`;
+}
+
+function updateClaimableUI() {
+  finalAmount.textContent = `${formatBTQ(accrued)} BTQ`;
+  timeSpent.textContent = `in ${formatSeconds(activeSeconds)}`;
+  claimBtn.textContent = `Claim ${formatBTQ(accrued)} BTQ`;
+  claimBtn.disabled = accrued < minClaim;
+
+  if (accrued < minClaim) {
+    claimBtn.textContent = `Need ${formatBTQ(minClaim - accrued)} more BTQ to claim`;
   }
 }
 
-function setStatus(text) {
-  statusText.textContent = text;
-}
-
-function resetUI() {
-  miningStatus.classList.remove('active');
-  progressFill.style.width = '0%';
-  hashRateEl.textContent = 'Hash rate: 0 H/s';
-  attemptsEl.textContent = 'Attempts: 0';
-  difficultyEl.textContent = 'Difficulty: -';
-  activeTimeEl.textContent = 'Active time: 0m 0s';
-  accruedEl.textContent = 'Accrued: 0.0000 BTQ';
-  currentDifficulty = 0;
-  activeSeconds = 0;
-  accrued = 0;
-  minClaim = 0.01;
-}
-
-function displaySuccess(txid) {
-  messageEl.className = 'message success show';
-  messageEl.innerHTML = `
-    ✅ Success! Transaction sent.<br>
-    <strong>TXID:</strong> <span style="word-break: break-all; font-family: monospace;">${txid}</span><br>
-    <small>Check your wallet for confirmation.</small>
-  `;
-}
-
-function displayError(message, isRetriable = true) {
-  messageEl.className = 'message error show';
-  messageEl.innerHTML = `❌ ${message}`;
-
-  if (isRetriable) {
-    startBtn.disabled = false;
-    startBtn.textContent = 'Start Mining';
+function setButtonLoading(button, loading, loadingText = '') {
+  if (loading) {
+    button.disabled = true;
+    button.dataset.originalText = button.innerHTML;
+    button.innerHTML = `<span class="spinner"></span>${loadingText ? ' ' + loadingText : ''}`;
+  } else {
+    button.disabled = false;
+    button.innerHTML = button.dataset.originalText || button.innerHTML;
   }
 }
 
+// Messages
+function showMessage(text, type = 'error') {
+  messageText.innerHTML = text;
+  messageEl.className = `message ${type} show`;
+}
+
+function dismissMessage() {
+  messageEl.classList.remove('show');
+}
+
+function showSuccess(txid) {
+  showMessage(`
+    Transaction sent successfully!<br>
+    <a href="https://explorer.bitcoinquantum.com/tx/${txid}" target="_blank" style="word-break: break-all; font-size: 12px;">View on Block Explorer</a>
+  `, 'success');
+}
+
+function showError(message, actionable = null) {
+  let html = message;
+  if (actionable) {
+    html += ` <a href="#" onclick="${actionable.action}; return false;">${actionable.text}</a>`;
+  }
+  showMessage(html, 'error');
+}
+
+// API Functions
 function connectWebSocket() {
   return new Promise((resolve, reject) => {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -93,10 +174,17 @@ function connectWebSocket() {
 }
 
 async function startSession(address) {
+  const body = { address };
+
+  // Include captcha token if captcha is enabled
+  if (captchaEnabled && captchaToken) {
+    body.captchaToken = captchaToken;
+  }
+
   const response = await fetch('/api/mining/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address })
+    body: JSON.stringify(body)
   });
 
   const data = await response.json();
@@ -137,6 +225,7 @@ async function claimSession(sessionId) {
   return data;
 }
 
+// Worker Management
 function createWorker(session, address) {
   miningWorker = new Worker('worker.js');
 
@@ -144,15 +233,13 @@ function createWorker(session, address) {
     const { type, counter, hashRate } = event.data;
 
     if (type === 'progress') {
-      hashRateEl.textContent = `Hash rate: ${hashRate.toLocaleString()} H/s`;
-      attemptsEl.textContent = `Attempts: ${counter.toLocaleString()}`;
-      const progress = Math.min((counter / 1000000) * 100, 99);
-      progressFill.style.width = `${progress}%`;
+      hashRateEl.textContent = `${hashRate.toLocaleString()} H/s`;
+      attemptsEl.textContent = counter.toLocaleString();
     }
 
     if (type === 'share') {
-      hashRateEl.textContent = `Hash rate: ${hashRate.toLocaleString()} H/s`;
-      attemptsEl.textContent = `Attempts: ${counter.toLocaleString()}`;
+      hashRateEl.textContent = `${hashRate.toLocaleString()} H/s`;
+      attemptsEl.textContent = counter.toLocaleString();
 
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
@@ -187,42 +274,45 @@ function closeWebSocket() {
   }
 }
 
-async function startMining(address) {
-  miningActive = true;
-  miningStatus.classList.add('active');
-  messageEl.classList.remove('show');
+// Mining Flow
+async function startMining() {
+  const address = addressInput.value.trim();
 
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-  claimBtn.disabled = true;
+  if (!address) {
+    showError('Please enter a valid BTQ address.');
+    return;
+  }
 
-  setStatus('Connecting...');
+  currentAddress = address;
+  dismissMessage();
+  setButtonLoading(startBtn, true, 'Connecting...');
 
   try {
     currentSession = await startSession(address);
     minClaim = currentSession.minClaim || minClaim;
 
     ws = await connectWebSocket();
+
     ws.addEventListener('close', () => {
       if (miningActive) {
         miningActive = false;
         stopWorker();
-        stopBtn.disabled = true;
-        startBtn.disabled = false;
-        setStatus('Connection closed.');
-        displayError('WebSocket connection closed.', false);
+        miningHero.classList.remove('pulse');
+        showError('Connection lost.', { text: 'Tap to retry', action: 'startMining()' });
+        setState(AppState.READY);
       }
     });
+
     ws.addEventListener('error', () => {
       if (miningActive) {
         miningActive = false;
         stopWorker();
-        stopBtn.disabled = true;
-        startBtn.disabled = false;
-        setStatus('Connection error.');
-        displayError('WebSocket connection error.', false);
+        miningHero.classList.remove('pulse');
+        showError('Connection error.', { text: 'Tap to retry', action: 'startMining()' });
+        setState(AppState.READY);
       }
     });
+
     ws.addEventListener('message', (event) => {
       const data = JSON.parse(event.data || '{}');
 
@@ -238,43 +328,46 @@ async function startMining(address) {
             });
           }
         }
-        updateStats();
+        updateMiningStats();
       }
 
       if (data.type === 'error') {
         miningActive = false;
         stopWorker();
         closeWebSocket();
-        stopBtn.disabled = true;
-        startBtn.disabled = false;
-        displayError(data.error, false);
-        setStatus('Stopped due to error.');
+        showError(data.error);
+        setState(AppState.READY);
       }
     });
 
+    // Initialize mining state
+    miningActive = true;
     currentDifficulty = currentSession.difficulty;
-    updateStats();
+    activeSeconds = 0;
+    accrued = 0;
 
+    // Update UI
+    addressBadge.textContent = truncateAddress(address);
+    updateMiningStats();
+    setState(AppState.MINING);
+
+    // Start the worker
     createWorker(currentSession, address);
-    setStatus('Mining (submitting shares)...');
+
   } catch (error) {
     miningActive = false;
     stopWorker();
     closeWebSocket();
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    setStatus('Ready');
-    displayError(error.message);
+    setButtonLoading(startBtn, false);
+    showError(error.message);
   }
 }
 
 async function stopMining() {
-  if (!currentSession) {
-    return;
-  }
+  if (!currentSession) return;
 
-  setStatus('Stopping mining...');
-  stopBtn.disabled = true;
+  setButtonLoading(stopBtn, true, 'Stopping...');
+  miningHero.classList.remove('pulse');
 
   stopWorker();
   closeWebSocket();
@@ -288,86 +381,204 @@ async function stopMining() {
     currentDifficulty = data.difficulty;
     minClaim = data.minClaim || minClaim;
 
-    updateStats();
-    setStatus('Stopped. Ready to claim.');
-    startBtn.disabled = false;
-    claimBtn.disabled = accrued < minClaim;
+    setState(AppState.CLAIMABLE);
+
   } catch (error) {
-    displayError(error.message, true);
+    showError(error.message);
+    setButtonLoading(stopBtn, false);
   }
 }
 
 async function claimRewards() {
-  if (!currentSession) {
-    return;
-  }
+  if (!currentSession) return;
 
-  claimBtn.disabled = true;
-  setStatus('Claiming rewards...');
+  setButtonLoading(claimBtn, true, 'Claiming...');
 
   try {
     const result = await claimSession(currentSession.sessionId);
-    displaySuccess(result.txid);
-    setStatus('Claimed.');
+
+    // Celebration animation
+    successCard.classList.add('celebrate');
+    setTimeout(() => successCard.classList.remove('celebrate'), 300);
+
+    showSuccess(result.txid);
+
+    // Reset for new session
+    currentSession = null;
+    accrued = 0;
+    activeSeconds = 0;
+
+    // Show ready state after a moment
+    setTimeout(() => {
+      dismissMessage();
+      setState(AppState.READY);
+    }, 5000);
+
   } catch (error) {
-    displayError(error.message, true);
-    claimBtn.disabled = false;
+    showError(error.message);
+    setButtonLoading(claimBtn, false);
   }
 }
 
-form.addEventListener('submit', async (e) => {
+function mineMore() {
+  // Keep the session but go back to mining
+  if (!currentSession) {
+    setState(AppState.READY);
+    return;
+  }
+
+  dismissMessage();
+  startMiningWithSession();
+}
+
+async function startMiningWithSession() {
+  setButtonLoading(mineMoreBtn, true, 'Resuming...');
+
+  try {
+    ws = await connectWebSocket();
+
+    ws.addEventListener('close', () => {
+      if (miningActive) {
+        miningActive = false;
+        stopWorker();
+        miningHero.classList.remove('pulse');
+        showError('Connection lost.');
+        setState(AppState.CLAIMABLE);
+      }
+    });
+
+    ws.addEventListener('error', () => {
+      if (miningActive) {
+        miningActive = false;
+        stopWorker();
+        miningHero.classList.remove('pulse');
+        showError('Connection error.');
+        setState(AppState.CLAIMABLE);
+      }
+    });
+
+    ws.addEventListener('message', (event) => {
+      const data = JSON.parse(event.data || '{}');
+
+      if (data.type === 'accepted') {
+        activeSeconds = data.activeSeconds;
+        accrued = data.accrued;
+        if (data.difficulty !== currentDifficulty) {
+          currentDifficulty = data.difficulty;
+          if (miningWorker) {
+            miningWorker.postMessage({
+              type: 'difficulty',
+              difficulty: currentDifficulty
+            });
+          }
+        }
+        updateMiningStats();
+      }
+
+      if (data.type === 'error') {
+        miningActive = false;
+        stopWorker();
+        closeWebSocket();
+        showError(data.error);
+        setState(AppState.CLAIMABLE);
+      }
+    });
+
+    miningActive = true;
+    updateMiningStats();
+    setState(AppState.MINING);
+
+    createWorker(currentSession, currentAddress);
+
+  } catch (error) {
+    showError(error.message);
+    setButtonLoading(mineMoreBtn, false);
+  }
+}
+
+// Event Listeners
+startBtn.addEventListener('click', (e) => {
   e.preventDefault();
-
-  if (miningActive) {
-    return;
-  }
-
-  const address = addressInput.value.trim();
-  if (!validateAddress(address)) {
-    displayError('Please enter a valid BTQ address.');
-    return;
-  }
-
-  resetUI();
-  await startMining(address);
+  startMining();
 });
 
-stopBtn.addEventListener('click', async () => {
-  if (!miningActive) {
-    return;
+addressInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    startMining();
   }
-
-  await stopMining();
 });
 
-claimBtn.addEventListener('click', async () => {
-  if (miningActive) {
-    displayError('Stop mining before claiming.', false);
-    return;
-  }
-
-  await claimRewards();
+stopBtn.addEventListener('click', () => {
+  stopMining();
 });
 
+claimBtn.addEventListener('click', () => {
+  claimRewards();
+});
+
+mineMoreBtn.addEventListener('click', () => {
+  mineMore();
+});
+
+// Cleanup on page unload
 window.addEventListener('beforeunload', () => {
   stopWorker();
   closeWebSocket();
 });
 
-fetch('/api/health')
-  .then(r => r.json())
-  .then(data => {
-    if (data.rpc !== 'ok') {
-      displayError('Faucet is offline. Please try again later.', false);
+// hCaptcha callbacks (must be global)
+window.onCaptchaVerified = function(token) {
+  captchaToken = token;
+  startBtn.disabled = false;
+};
+
+window.onCaptchaExpired = function() {
+  captchaToken = null;
+  startBtn.disabled = true;
+};
+
+// Initialize captcha and check health
+async function initialize() {
+  try {
+    // Check for captcha configuration
+    const configResponse = await fetch('/api/config');
+    const config = await configResponse.json();
+
+    if (config.captchaSiteKey) {
+      captchaEnabled = true;
+      // Set the site key on the captcha widget
+      const captchaWidget = document.querySelector('.h-captcha');
+      if (captchaWidget) {
+        captchaWidget.setAttribute('data-sitekey', config.captchaSiteKey);
+      }
+      // Keep start button disabled until captcha is verified
+      startBtn.disabled = true;
+    } else {
+      // No captcha configured, hide the container and enable button
+      captchaEnabled = false;
+      const captchaContainer = document.getElementById('captcha-container');
+      if (captchaContainer) {
+        captchaContainer.style.display = 'none';
+      }
+      startBtn.disabled = false;
+    }
+
+    // Health check
+    const healthResponse = await fetch('/api/health');
+    const health = await healthResponse.json();
+
+    if (health.rpc !== 'ok') {
+      showError('Faucet is currently offline. Please try again later.');
       startBtn.disabled = true;
     }
-  })
-  .catch(() => {
-    displayError('Cannot connect to faucet. Please try again later.', false);
+  } catch (error) {
+    showError('Cannot connect to faucet server. Please try again later.');
     startBtn.disabled = true;
-  });
+  }
 
-resetUI();
-setStatus('Ready');
-stopBtn.disabled = true;
-claimBtn.disabled = true;
+  setState(AppState.READY);
+}
+
+// Initialize
+initialize();

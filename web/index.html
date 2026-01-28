@@ -4,154 +4,500 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bitcoin Quantum Testnet Faucet</title>
+
+  <!-- Google Fonts: DM Sans & Manrope (matching BTQ website) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- hCaptcha -->
+  <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+
   <style>
+    :root {
+      --background: #06080c;
+      --foreground: #ffffff;
+      --primary: #00f0ff;
+      --secondary: #a78bfa;
+      --card: #0c1017;
+      --font-dm-sans: 'DM Sans', sans-serif;
+      --font-dm-mono: 'DM Mono', 'Courier New', monospace;
+      --font-manrope: 'Manrope', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #0d47a1, #1976d2);
+      font-family: var(--font-dm-mono);
+      background: var(--background);
+      color: var(--foreground);
       min-height: 100vh;
       margin: 0;
       padding: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow-x: hidden;
+      position: relative;
     }
 
+    /* Grid background - matching BTQ website */
+    .grid-background {
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Rotating circle background */
+    .circle-bg {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 800px;
+      height: 800px;
+      pointer-events: none;
+      z-index: 0;
+      animation: spin-slow 60s linear infinite;
+      filter: brightness(2) contrast(1.5) invert(1);
+      opacity: 0.8;
+    }
+
+    @keyframes spin-slow {
+      from { transform: translate(-50%, -50%) rotate(0deg); }
+      to { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+
+    /* Container/Card - matching BTQ card style */
     .container {
-      background: white;
+      background: var(--card);
+      border: 1px solid rgba(0, 240, 255, 0.1);
       border-radius: 12px;
-      padding: 30px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-      max-width: 520px;
+      padding: 32px;
+      max-width: 440px;
       width: 100%;
+      position: relative;
+      z-index: 1;
+    }
+
+    .container:hover {
+      border-color: rgba(0, 240, 255, 0.2);
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.05);
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 24px;
     }
 
     h1 {
-      margin: 0 0 5px 0;
+      font-family: var(--font-dm-sans);
+      margin: 0 0 4px 0;
       font-size: 28px;
-      color: #1a237e;
-      text-align: center;
+      font-weight: 400;
+      color: var(--foreground);
+      letter-spacing: -0.02em;
     }
 
     .subtitle {
-      text-align: center;
-      color: #666;
-      margin-bottom: 20px;
+      font-family: var(--font-dm-mono);
+      color: rgba(255, 255, 255, 0.6);
+      margin: 0;
+      font-size: 14px;
+      font-weight: 400;
     }
 
+    /* Gradient text - matching BTQ website */
+    .gradient-text {
+      background: linear-gradient(to right, var(--primary), var(--secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* State management */
+    .state {
+      display: none;
+    }
+
+    .state.active {
+      display: block;
+    }
+
+    /* Info box */
+    .info-box {
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.1);
+      border-left: 3px solid var(--primary);
+      padding: 16px;
+      margin-bottom: 24px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.8);
+      line-height: 1.6;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .info-box strong {
+      color: var(--primary);
+    }
+
+    /* Form elements */
     .form-group {
-      margin-bottom: 15px;
+      margin-bottom: 16px;
+    }
+
+    /* Captcha container */
+    .captcha-container {
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: center;
+    }
+
+    .captcha-container .h-captcha {
+      transform: scale(0.95);
+      transform-origin: center;
     }
 
     label {
+      font-family: var(--font-dm-sans);
       display: block;
-      margin-bottom: 5px;
-      font-weight: 600;
-      color: #333;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: var(--foreground);
+      font-size: 14px;
     }
 
     input {
+      font-family: var(--font-dm-mono);
       width: 100%;
-      padding: 12px;
-      border: 2px solid #e0e0e0;
-      border-radius: 6px;
+      padding: 14px 16px;
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 8px;
       font-size: 14px;
-      box-sizing: border-box;
+      transition: all 0.2s ease;
+      background: rgba(0, 0, 0, 0.3);
+      color: var(--foreground);
+    }
+
+    input::placeholder {
+      color: rgba(255, 255, 255, 0.4);
     }
 
     input:focus {
-      border-color: #1976d2;
+      border-color: var(--primary);
       outline: none;
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
     }
 
-    .button-row {
-      display: flex;
-      gap: 10px;
+    input:disabled {
+      background: rgba(0, 0, 0, 0.2);
+      color: rgba(255, 255, 255, 0.4);
     }
 
-    button {
-      flex: 1;
-      background: #1976d2;
-      color: white;
+    /* Buttons - matching BTQ website btn-glow */
+    .btn {
+      font-family: var(--font-dm-sans);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
       border: none;
-      padding: 12px;
-      font-size: 14px;
-      font-weight: 600;
-      border-radius: 6px;
+      padding: 14px 24px;
+      font-size: 15px;
+      font-weight: 500;
+      border-radius: 8px;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all 0.2s ease;
     }
 
-    button:hover:not(:disabled) {
-      background: #1565c0;
+    .btn:active:not(:disabled) {
+      transform: scale(0.98);
     }
 
-    button:disabled {
-      background: #b0bec5;
+    .btn:disabled {
+      opacity: 0.5;
       cursor: not-allowed;
     }
 
-    .secondary {
-      background: #455a64;
+    .btn-full {
+      width: 100%;
     }
 
-    .secondary:hover:not(:disabled) {
-      background: #37474f;
+    .btn-primary {
+      background: var(--primary);
+      color: var(--background);
     }
 
-    .success-btn {
-      background: #2e7d32;
+    .btn-primary:hover:not(:disabled) {
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.3), 0 0 60px rgba(0, 240, 255, 0.15);
+      transform: translateY(-2px);
     }
 
-    .success-btn:hover:not(:disabled) {
-      background: #1b5e20;
+    .btn-secondary {
+      background: transparent;
+      color: var(--foreground);
+      border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
-    .mining-status {
-      display: none;
-      margin-top: 20px;
-      padding: 15px;
-      background: #f5f5f5;
+    .btn-secondary:hover:not(:disabled) {
+      border-color: var(--primary);
+      color: var(--primary);
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+    }
+
+    .btn-success {
+      background: var(--primary);
+      color: var(--background);
+    }
+
+    .btn-success:hover:not(:disabled) {
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.3), 0 0 60px rgba(0, 240, 255, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .btn-text {
+      background: transparent;
+      color: var(--primary);
+      padding: 10px 16px;
+      font-weight: 500;
+    }
+
+    .btn-text:hover:not(:disabled) {
+      background: rgba(0, 240, 255, 0.1);
+    }
+
+    /* Spinner for loading states */
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(6, 8, 12, 0.3);
+      border-top-color: var(--background);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .btn-secondary .spinner {
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-top-color: var(--foreground);
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Address badge */
+    .address-badge {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(0, 240, 255, 0.1);
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      padding: 8px 14px;
       border-radius: 6px;
+      font-family: var(--font-dm-mono);
+      font-size: 13px;
+      color: var(--primary);
+      margin-bottom: 20px;
     }
 
-    .mining-status.active {
-      display: block;
+    /* Mining hero section */
+    .mining-hero {
+      text-align: center;
+      padding: 24px 0;
     }
 
-    .status-text {
-      font-weight: 600;
-      margin-bottom: 10px;
-      color: #1a237e;
+    .mining-hero.pulse {
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(0, 240, 255, 0);
+      }
+      50% {
+        box-shadow: 0 0 0 12px rgba(0, 240, 255, 0.1);
+      }
+    }
+
+    .accrued-display {
+      margin-bottom: 8px;
+    }
+
+    .accrued-display .amount {
+      font-family: var(--font-dm-sans);
+      font-size: 52px;
+      font-weight: 300;
+      color: var(--foreground);
+      line-height: 1;
+    }
+
+    .accrued-display .unit {
+      font-family: var(--font-dm-mono);
+      font-size: 18px;
+      font-weight: 400;
+      color: var(--primary);
+      margin-left: 8px;
+    }
+
+    .mining-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--primary);
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .mining-indicator .dot {
+      width: 8px;
+      height: 8px;
+      background: var(--primary);
+      border-radius: 50%;
+      animation: blink 1s ease-in-out infinite;
+      box-shadow: 0 0 10px var(--primary);
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Progress section */
+    .progress-section {
+      margin: 20px 0;
     }
 
     .progress-bar {
-      background: #e0e0e0;
+      background: rgba(255, 255, 255, 0.1);
       height: 8px;
       border-radius: 4px;
       overflow: hidden;
-      margin-bottom: 10px;
+      position: relative;
     }
 
     .progress-fill {
       height: 100%;
-      background: #4caf50;
+      background: linear-gradient(90deg, var(--primary), var(--secondary));
       width: 0%;
-      transition: width 0.3s;
+      transition: width 0.3s ease;
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
     }
 
-    .hash-rate,
-    .attempts,
-    .stat-line {
-      color: #555;
+    .progress-label {
+      display: block;
+      text-align: center;
+      margin-top: 10px;
       font-size: 13px;
-      margin-top: 4px;
+      color: rgba(255, 255, 255, 0.5);
     }
 
-    .message {
-      margin-top: 20px;
-      padding: 12px;
-      border-radius: 6px;
+    /* Technical details (collapsible) */
+    .tech-details {
+      margin: 16px 0;
+      padding: 14px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(0, 240, 255, 0.1);
+      border-radius: 8px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .tech-details summary {
+      cursor: pointer;
+      color: var(--primary);
+      font-weight: 500;
+      user-select: none;
+      list-style: none;
+    }
+
+    .tech-details summary::-webkit-details-marker {
       display: none;
+    }
+
+    .tech-details summary::before {
+      content: '+ ';
+      font-family: var(--font-dm-mono);
+    }
+
+    .tech-details[open] summary::before {
+      content: '- ';
+    }
+
+    .tech-details .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .tech-details .detail-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tech-details .detail-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.4);
+      letter-spacing: 0.5px;
+    }
+
+    .tech-details .detail-value {
+      font-family: var(--font-dm-mono);
+      font-weight: 500;
+      color: var(--foreground);
+    }
+
+    /* Success card */
+    .success-card {
+      text-align: center;
+      padding: 28px;
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    .success-card p {
+      font-family: var(--font-dm-sans);
+      margin: 0;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+    }
+
+    .success-card .amount-large {
+      font-family: var(--font-dm-sans);
+      font-size: 44px;
+      font-weight: 300;
+      background: linear-gradient(to right, var(--primary), var(--secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin: 8px 0;
+    }
+
+    .success-card .time-spent {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    /* Message area */
+    .message {
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      display: none;
+      position: relative;
+      font-size: 14px;
+      line-height: 1.5;
     }
 
     .message.show {
@@ -159,84 +505,216 @@
     }
 
     .message.success {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
+      background: rgba(0, 240, 255, 0.1);
+      color: var(--primary);
+      border: 1px solid rgba(0, 240, 255, 0.2);
     }
 
     .message.error {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
+      background: rgba(255, 82, 82, 0.1);
+      color: #ff5252;
+      border: 1px solid rgba(255, 82, 82, 0.2);
     }
 
-    .footer {
-      margin-top: 30px;
-      text-align: center;
-      color: white;
-      font-size: 14px;
-    }
-
-    .footer a {
-      color: white;
+    .message a {
+      color: inherit;
       text-decoration: underline;
     }
 
-    .info-box {
-      background: #e3f2fd;
-      border-left: 4px solid #2196f3;
-      padding: 12px;
-      margin-bottom: 20px;
+    .message .dismiss {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      color: inherit;
+      opacity: 0.6;
+      padding: 4px 8px;
+      line-height: 1;
+    }
+
+    .message .dismiss:hover {
+      opacity: 1;
+    }
+
+    /* Footer */
+    footer {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(0, 240, 255, 0.1);
+      text-align: center;
       font-size: 13px;
-      color: #1565c0;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    footer a {
+      color: var(--primary);
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    footer a:hover {
+      text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+    }
+
+    /* Claim animation */
+    @keyframes celebrate {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+      100% { transform: scale(1); }
+    }
+
+    .celebrate {
+      animation: celebrate 0.3s ease;
+    }
+
+    /* Button group for claimable state */
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .container {
+        padding: 24px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      .accrued-display .amount {
+        font-size: 42px;
+      }
+
+      .success-card .amount-large {
+        font-size: 36px;
+      }
+
+      .circle-bg {
+        width: 500px;
+        height: 500px;
+      }
     }
   </style>
 </head>
 <body>
+  <div class="grid-background"></div>
+  <img src="circlebg.svg" class="circle-bg" alt="">
   <div class="container">
-    <h1>⚛️ Bitcoin Quantum Faucet</h1>
-    <p class="subtitle">Testnet Mining Faucet</p>
+    <header>
+      <h1>Bitcoin Quantum Faucet</h1>
+      <p class="subtitle">Testnet Faucet</p>
+    </header>
 
-    <div class="info-box">
-      Enter your BTQ testnet address and start mining. Rewards accrue at 0.01 BTQ/minute of active mining.
-      Stop mining to claim once you reach at least 0.01 BTQ.
-    </div>
+    <!-- State: Ready (initial) -->
+    <section id="state-ready" class="state active">
+      <div class="info-box">
+        <strong>What is this?</strong> This faucet provides free BTQ testnet tokens. To prevent abuse, it requires a small proof-of-work task in exchange for tokens.<br><br>
+        <strong>How it works:</strong> Enter your address and start mining. Rewards accrue at 0.01 BTQ per minute. Stop anytime and claim your tokens once you reach the 0.01 BTQ minimum.
+      </div>
 
-    <form id="faucet-form">
       <div class="form-group">
-        <label for="address">Dilithium Address</label>
+        <label for="address">Your BTQ Address</label>
         <input
           type="text"
           id="address"
-          placeholder="nTb8m... or tbtq1q..."
-          required
+          placeholder="Enter your testnet address (nTb8m... or tbtq1q...)"
+          autocomplete="off"
+          spellcheck="false"
         >
       </div>
-      <div class="button-row">
-        <button type="submit" id="start-btn">Start Mining</button>
-        <button type="button" id="stop-btn" class="secondary">Stop</button>
-        <button type="button" id="claim-btn" class="success-btn">Claim</button>
-      </div>
-    </form>
 
-    <div class="mining-status" id="mining-status">
-      <div class="status-text" id="status-text">Ready</div>
-      <div class="progress-bar">
-        <div class="progress-fill" id="progress-fill"></div>
+      <div class="captcha-container" id="captcha-container">
+        <div class="h-captcha" data-sitekey="" data-theme="dark" data-callback="onCaptchaVerified" data-expired-callback="onCaptchaExpired"></div>
       </div>
-      <div class="hash-rate" id="hash-rate">Hash rate: 0 H/s</div>
-      <div class="attempts" id="attempts">Attempts: 0</div>
-      <div class="stat-line" id="difficulty">Difficulty: -</div>
-      <div class="stat-line" id="active-time">Active time: 0m 0s</div>
-      <div class="stat-line" id="accrued">Accrued: 0.0000 BTQ</div>
+
+      <button id="start-btn" class="btn btn-primary btn-full" disabled>
+        Start Mining
+      </button>
+    </section>
+
+    <!-- State: Mining (active) -->
+    <section id="state-mining" class="state">
+      <div class="address-badge" id="address-badge"></div>
+
+      <div class="mining-hero pulse" id="mining-hero">
+        <div class="accrued-display">
+          <span class="amount" id="accrued-amount">0.0000</span>
+          <span class="unit">BTQ</span>
+        </div>
+        <div class="mining-indicator">
+          <span class="dot"></span>
+          Mining...
+        </div>
+      </div>
+
+      <div class="progress-section">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <span class="progress-label" id="progress-label">0% to minimum claim (0.01 BTQ)</span>
+      </div>
+
+      <details class="tech-details">
+        <summary>Technical Details</summary>
+        <div class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">Hash Rate</span>
+            <span class="detail-value" id="hash-rate">0 H/s</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Difficulty</span>
+            <span class="detail-value" id="difficulty">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Attempts</span>
+            <span class="detail-value" id="attempts">0</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Active Time</span>
+            <span class="detail-value" id="active-time">0m 0s</span>
+          </div>
+        </div>
+      </details>
+
+      <button id="stop-btn" class="btn btn-secondary btn-full">
+        Stop Mining
+      </button>
+    </section>
+
+    <!-- State: Claimable (stopped with balance) -->
+    <section id="state-claimable" class="state">
+      <div class="success-card" id="success-card">
+        <p>You earned</p>
+        <div class="amount-large" id="final-amount">0.0000 BTQ</div>
+        <p class="time-spent" id="time-spent">in 0m 0s</p>
+      </div>
+
+      <div class="button-group">
+        <button id="claim-btn" class="btn btn-success btn-full">
+          Claim BTQ
+        </button>
+        <button id="mine-more-btn" class="btn btn-text btn-full">
+          Mine more instead
+        </button>
+      </div>
+    </section>
+
+    <!-- Message area -->
+    <div id="message" class="message">
+      <button class="dismiss" onclick="dismissMessage()">&times;</button>
+      <span id="message-text"></span>
     </div>
 
-    <div class="message" id="message"></div>
-  </div>
-
-  <div class="footer">
-    Powered by Bitcoin Quantum |
-    <a href="https://github.com/bitcoinquantum/btq-core" target="_blank">GitHub</a>
+    <footer>
+      Powered by <a href="https://bitcoinquantum.com/" target="_blank">Bitcoin Quantum</a> &middot;
+      <a href="https://github.com/btq-ag/btq-core/" target="_blank">GitHub</a>
+    </footer>
   </div>
 
   <script src="app.js"></script>
