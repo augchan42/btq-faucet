@@ -56,6 +56,35 @@ const newSessionBtn = document.getElementById('new-session-btn');
 const messageEl = document.getElementById('message');
 const messageText = document.getElementById('message-text');
 
+// Address Validation
+// BTQ address formats:
+// - Dilithium testnet: starts with 'n' (base58, ~50 chars)
+// - Dilithium mainnet: starts with 'd' (base58, ~50 chars)
+// - SegWit testnet: starts with 'tbtq1q' (bech32)
+// - SegWit mainnet: starts with 'btq1q' (bech32)
+// - Legacy testnet: starts with 'm' or 'n' (but shorter than Dilithium)
+// - Legacy mainnet: starts with 'B'
+function isValidBTQAddress(address) {
+  if (!address || typeof address !== 'string') return false;
+
+  // Dilithium addresses (base58, longer ~50 chars)
+  if (/^[nd][a-km-zA-HJ-NP-Z1-9]{40,60}$/.test(address)) {
+    return true;
+  }
+
+  // SegWit bech32 addresses
+  if (/^(tbtq1q|btq1q)[a-z0-9]{38,}$/.test(address)) {
+    return true;
+  }
+
+  // Legacy addresses (shorter base58)
+  if (/^[mMnNB][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(address)) {
+    return true;
+  }
+
+  return false;
+}
+
 // State Management
 function setState(newState) {
   currentState = newState;
@@ -289,7 +318,12 @@ async function startMining() {
   const address = addressInput.value.trim();
 
   if (!address) {
-    showError('Please enter a valid BTQ address.');
+    showError('Please enter a BTQ address.');
+    return;
+  }
+
+  if (!isValidBTQAddress(address)) {
+    showError('Invalid BTQ address format.');
     return;
   }
 
