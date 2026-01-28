@@ -234,7 +234,8 @@ class FaucetDB {
     const stmt = this.db.prepare(`
       UPDATE sessions
       SET status = 'active',
-          stopped_at = NULL
+          stopped_at = NULL,
+          last_counter = 0
       WHERE session_id = ? AND status = 'stopped'
     `);
 
