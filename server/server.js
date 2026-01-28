@@ -23,7 +23,10 @@ const CONFIG = {
   ACTIVE_SHARE_WINDOW: parseInt(process.env.ACTIVE_SHARE_WINDOW || '30'),
   SESSION_EXPIRE_SECONDS: parseInt(process.env.SESSION_EXPIRE_SECONDS || '3600'),
   IP_SALT: process.env.IP_SALT || crypto.randomBytes(32).toString('hex'),
-  PORT: parseInt(process.env.PORT || '3000')
+  PORT: parseInt(process.env.PORT || '3000'),
+  // hCaptcha configuration (optional)
+  HCAPTCHA_SITEKEY: process.env.HCAPTCHA_SITEKEY || '',
+  HCAPTCHA_SECRET: process.env.HCAPTCHA_SECRET || ''
 };
 
 const app = express();
@@ -101,6 +104,34 @@ function validateAddress(address) {
   return address && address.length > 0;
 }
 
+// Verify hCaptcha token
+async function verifyCaptcha(token, remoteIp) {
+  if (!CONFIG.HCAPTCHA_SECRET) {
+    // Captcha not configured, skip verification
+    return true;
+  }
+
+  try {
+    const response = await fetch('https://api.hcaptcha.com/siteverify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        secret: CONFIG.HCAPTCHA_SECRET,
+        response: token,
+        remoteip: remoteIp
+      })
+    });
+
+    const data = await response.json();
+    return data.success === true;
+  } catch (error) {
+    console.error('Captcha verification error:', error);
+    return false;
+  }
+}
+
 // Select coins for transaction
 function selectCoins(utxos, targetAmount) {
   // Sort UTXOs by amount (ascending) for efficient selection
@@ -176,13 +207,35 @@ async function sendDilithiumTx(address, amount, fee) {
 
 // API Endpoints
 
+// GET /api/config - Returns public configuration (captcha sitekey)
+app.get('/api/config', (req, res) => {
+  res.json({
+    captchaSiteKey: CONFIG.HCAPTCHA_SITEKEY || null,
+    minClaim: CONFIG.MIN_CLAIM,
+    rewardPerMinute: CONFIG.REWARD_PER_MINUTE
+  });
+});
+
 // POST /api/mining/start
-app.post('/api/mining/start', (req, res) => {
+app.post('/api/mining/start', async (req, res) => {
   try {
-    const { address } = req.body;
+    const { address, captchaToken } = req.body;
 
     if (!validateAddress(address)) {
       return res.status(400).json({ error: 'Invalid address' });
+    }
+
+    // Verify captcha if configured
+    if (CONFIG.HCAPTCHA_SECRET) {
+      if (!captchaToken) {
+        return res.status(400).json({ error: 'Captcha verification required' });
+      }
+
+      const ip = getClientIP(req);
+      const captchaValid = await verifyCaptcha(captchaToken, ip);
+      if (!captchaValid) {
+        return res.status(400).json({ error: 'Captcha verification failed' });
+      }
     }
 
     const existing = db.getActiveSessionByAddress(address);
