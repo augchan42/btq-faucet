@@ -22,7 +22,7 @@ RestartSec=10
 
 # Environment
 Environment=NODE_ENV=production
-Environment=PORT=3000
+Environment=PORT=8008
 EnvironmentFile=/var/www/btq-faucet/.env
 
 # Security hardening
