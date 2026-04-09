@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /api/
+Disallow: /ws
+
+Sitemap: https://faucet.qdayanon.com/sitemap.xml
